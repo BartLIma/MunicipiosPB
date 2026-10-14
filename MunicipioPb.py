@@ -25,17 +25,26 @@ HTTP_HEADERS = {
 @st.cache_data
 def carregar_banco_coordenadas():
     """
-    Carrega o arquivo CSV criado pelo usuário no repositório.
-    O uso do @st.cache_data faz com que o Streamlit leia o arquivo apenas uma vez.
+    Carrega o arquivo CSV tratando automaticamente se ele foi separado por vírgula 
+    ou ponto e vírgula, e remove assinaturas de arquivos UTF-8 ocultas.
     """
     try:
-        # Lê o CSV e garante que a coluna de busca seja tratada como string
-        df = pd.read_csv("coordenadas.csv")
-        df['municipio'] = df['municipio'].astype(str).str.strip().str.lower()
+        # O encoding='utf-8-sig' remove caracteres ocultos que o Excel joga no início do arquivo
+        # O sep=None com o engine='python' detecta se o separador usado é ',' ou ';' de forma automática
+        df = pd.read_csv("coordenadas.csv", sep=None, engine='python', encoding='utf-8-sig')
+        
+        # Limpa e padroniza o nome das colunas caso tenham espaços invisíveis
+        df.columns = df.columns.str.strip().str.lower()
+        
+        # Trata o texto da coluna de busca
+        if 'municipio' in df.columns:
+            df['municipio'] = df['municipio'].astype(str).str.strip().str.lower()
+            
         return df
     except Exception as e:
         st.error(f"⚠️ Erro ao carregar o arquivo 'coordenadas.csv': {e}")
         return None
+
 
 # =============================================================================
 # 3. TRANSFORMAÇÃO DO NOME (GERAÇÃO DA URL E BUSCA NO CSV)
