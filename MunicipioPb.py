@@ -29,28 +29,29 @@ HTTP_HEADERS = {
 # =============================================================================
 def normalizar_slug_municipio(nome_municipio: str) -> str:
     """
-    Transforma o nome do município no padrão esperado pela URL da FAMUP (Iniciais Maiúsculas).
-    Exemplo: "campina grande" -> "Campina-Grande" | "aguiar" -> "Aguiar"
+    Transforma o nome do município no padrão correto da URL da FAMUP (Sempre em minúsculas).
+    Exemplo: "Aguiar" -> "aguiar" | "Campina Grande" -> "campina-grande"
     """
-    # 1. Trata espaços extras e capitaliza as iniciais de cada palavra (Padrão exigido pela FAMUP)
-    nome_formatado = nome_municipio.strip().title()
+    # 1. Forçar letras minúsculas e limpar espaços nas pontas
+    slug = nome_municipio.strip().lower()
     
     # 2. Remover acentuação utilizando normalização Unicode
     slug = ''.join(
-        caractere for caractere in unicodedata.normalize('NFD', nome_formatado)
+        caractere for caractere in unicodedata.normalize('NFD', slug)
         if unicodedata.category(caractere) != 'Mn'
     )
     
-    # 3. Substituir espaços por hifens
+    # 3. Substituir espaços por hifens (para cidades com nomes compostos)
     slug = slug.replace(" ", "-")
     
     # 4. Remover apóstrofos, aspas e outros caracteres especiais inválidos na URL
-    slug = re.sub(r'[^a-zA-Z0-9\-]', '', slug)
+    slug = re.sub(r'[^a-z0-9\-]', '', slug)
     
     # 5. Evitar múltiplos hifens seguidos
     slug = re.sub(r'-+', '-', slug)
     
     return slug
+
 
 
 def limpar_texto_extraido(texto: str) -> str:
