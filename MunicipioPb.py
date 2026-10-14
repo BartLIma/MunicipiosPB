@@ -21,7 +21,7 @@ def normalizar_nome_municipio(nome):
 
 def consultar_municipio_famup(municipio):
     municipio_formatado = normalizar_nome_municipio(municipio)
-    url = f"https://famup.org.br{municipio_formatado}/"
+    url = f"https://famup.org.br/paraiba/{municipio_formatado}/"
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
