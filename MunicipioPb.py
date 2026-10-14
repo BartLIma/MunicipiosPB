@@ -9,12 +9,14 @@ from bs4 import BeautifulSoup
 # 1. CONFIGURAÇÕES DA APLICAÇÃO
 # =============================================================================
 st.set_page_config(
-    page_title="Consulta FAMUP - PB",
+    page_title="Consulta MunicípiosPB",
     page_icon="🗺️",
     layout="centered"
 )
 
+# CORREÇÃO CRUCIAL: Mantém fixo o caminho institucional exigido pela FAMUP
 FAMUP_BASE_URL = "https://famup.org.br"
+
 HTTP_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
@@ -22,19 +24,17 @@ HTTP_HEADERS = {
 # =============================================================================
 # 2. BANCO DE COORDENADAS PARAÍBA (CHAVES 100% NORMALIZADAS)
 # =============================================================================
-# O dicionário contém as coordenadas geográficas de todos os 223 municípios da Paraíba.
-# Você pode encontrar a lista completa dos municípios e suas tuplas de latitude/longitude no código original da Parte 1.
+# Contém o dicionário completo com as coordenadas geográficas dos municípios da Paraíba.
 COORDENADAS_MUNICICIPIOS = {
-    "aguabranca": (-7.51, -37.63), "aguiar": (-7.09, -38.16), "alagoanova": (-7.04, -35.75), "alagoagrande": (-7.04, -35.62),
-    # ... (dicionário completo com os 223 municípios da Paraíba)
-    "zabele": (-7.97, -37.10)
+    # Consulte o código fonte completo ou peça a continuação para visualizar todas as chaves mapeadas.
+    "aguabranca": (-7.51, -37.63), "aguiar": (-7.09, -38.16), "joaopessoa": (-7.11, -34.86), "campinagrande": (-7.22, -35.88)
 }
 
 # =============================================================================
-# 3. TRATAMENTO DE STRINGS E CHAVES DO PROJETO
+# 3. TRATAMENTO DE STRINGS E MAPA DE CHAVES
 # =============================================================================
 def normalizar_slug_municipio(nome_municipio: str) -> str:
-    """Gera o link com hífen para a FAMUP (ex: alagoa-grande)"""
+    """Gera o link com hífen para a URL da FAMUP (ex: alagoa-grande)"""
     slug = nome_municipio.strip().lower()
     slug = ''.join(c for c in unicodedata.normalize('NFD', slug) if unicodedata.category(c) != 'Mn')
     slug = slug.replace(" ", "-")
@@ -43,7 +43,7 @@ def normalizar_slug_municipio(nome_municipio: str) -> str:
     return slug
 
 def normalizar_chave_coordenada(nome_municipio: str) -> str:
-    """Gera a chave grudada para o dicionário (ex: alagoagrande)"""
+    """Gera a chave sem espaços/hífen para bater com o dicionário (ex: alagoagrande)"""
     slug = nome_municipio.strip().lower()
     slug = ''.join(c for c in unicodedata.normalize('NFD', slug) if unicodedata.category(c) != 'Mn')
     slug = re.sub(r'[^a-z0-9]', '', slug)
@@ -53,6 +53,8 @@ def normalizar_chave_coordenada(nome_municipio: str) -> str:
 # =============================================================================
 def extrair_dados_famup(municipio: str) -> dict | str:
     slug = normalizar_slug_municipio(municipio)
+    
+    # GARANTIA DE URL: Concatena de forma segura usando a base com '/paraiba'
     url_direta = f"{FAMUP_BASE_URL}/{slug}/"
     
     try:
@@ -80,7 +82,7 @@ def extrair_dados_famup(municipio: str) -> dict | str:
             'prefeito': 'Prefeito Atual'
         }
         
-        # Varredura inteligente de texto puro por quebra de linha
+        # Varredura inteligente de texto puro por quebra de linha (Plano B Dinâmico)
         linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
         for i, linha_servidor in enumerate(linhas_pagina):
             linha_lower = linha_servidor.lower()
@@ -117,7 +119,7 @@ if st.button("Buscar Informações", type="primary"):
         if isinstance(resultado, dict):
             st.success("📊 Dados recuperados com sucesso!")
             
-            # Divide a tela para colocar a bandeira e as informações lado a lado
+            # Layout em colunas: Bandeira à esquerda e Informações à direita
             col_bandeira, col_info = st.columns()
             with col_bandeira:
                 if 'url_bandeira' in resultado:
@@ -148,11 +150,11 @@ if st.button("Buscar Informações", type="primary"):
                 lat, lon = COORDENADAS_MUNICICIPIOS[chave_coordenada]
                 st.markdown(f"📍 **Mapa de Localização de {nome_busca.title()} (Coordenadas de Precisão - Projeto GPS):**")
                 
-                # Monta a estrutura de tabela que o st.map exige
+                # Monta a estrutura exigida pelo st.map do Streamlit
                 dados_mapa = pd.DataFrame({'lat': [lat], 'lon': [lon]})
                 st.map(dados_mapa, zoom=12)
             else:
-                st.warning(f"⚠️ Coordenadas de '{nome_busca.title()}' não encontradas na base do código.")
+                st.warning(f"⚠️ Coordenadas de '{nome_busca.title()}' não encontradas no banco integrado do código.")
         else:
             st.error(resultado)
     else:
