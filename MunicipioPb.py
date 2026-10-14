@@ -100,41 +100,7 @@ def normalizar_chave_coordenada(nome_municipio: str) -> str:
     slug = ''.join(c for c in unicodedata.normalize('NFD', slug) if unicodedata.category(c) != 'Mn')
     slug = re.sub(r'[^a-z0-9]', '', slug)
     return slug
-# =============================================================================
-# 4. EXTRAÇÃO DE DADOS TEXTUAIS E BANDEIRA (WEB SCRAPING)
-# =============================================================================
-def extrair_dados_famup(municipio: str) -> dict | str:
-    slug = normalizar_slug_municipio(municipio)
-    
-    # GARANTIA DE URL: Mantém a base estável com o diretório /paraiba fixo
-    url_direta = f"{FAMUP_BASE_URL}/{slug}/"
-    
-    try:
-        response = requests.get(url_direta, headers=HTTP_HEADERS, timeout=10)
-        
-        if response.status_code == 404:
-            return f"❌ O endereço direto não foi encontrado na FAMUP.\nLink tentado: {url_direta}"
-        elif response.status_code != 200:
-            return f"❌ Erro de conexão com a FAMUP (Código HTTP: {response.status_code})."
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        dados_coletados = {}
-        
-        # Captura da Bandeira Oficial via SisGF
-        tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
-        if tag_img and tag_img.get('src'):
-            dados_coletados['url_bandeira'] = tag_img['src']
-        
-        mapeamento = {
-            'razão social': 'Razão Social',
-            'endereço': 'Endereço',
-            'site': 'Site Oficial',
-            'telefones': 'Telefones',
-            'emails': 'E-mails de Contato',
-            'prefeito': 'Prefeito Atual'
-        }
-        
-        # Varredura inteligente de texto puro por quebra de linha
+# Varredura inteligente de texto puro por quebra de linha
         linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
         for i, linha_servidor in enumerate(linhas_pagina):
             linha_lower = linha_servidor.lower()
@@ -149,10 +115,28 @@ def extrair_dados_famup(municipio: str) -> dict | str:
                                 continue
                             dados_coletados[label_interface] = candidato_valor
                             break
+                            
+        # ==========================================
+        # TRATAMENTO PARA REMOVER DUPLICATAS DE E-MAIL
+        # ==========================================
+        if 'E-mails de Contato' in dados_coletados:
+            email_bruto = dados_coletados['E-mails de Contato']
+            # Divide por pipe (|) ou espaços duplicados caso venham grudados, limpa e remove duplicatas
+            # Usamos uma expressão regular ou split padrão para isolar os e-mails limpos
+            partes = re.split(r'[|\s]+', email_bruto)
+            emails_validos = [e.strip() for e in partes if '@' in e and '.' in e]
+            
+            # Remove duplicatas mantendo a ordem original
+            emails_unicos = list(dict.fromkeys(emails_validos))
+            
+            if emails_unicos:
+                dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
+            else:
+                dados_coletados['E-mails de Contato'] = email_bruto # Mantém o original se não achar o '@'
+
         return dados_coletados
     except Exception as e:
         return f"❌ Erro ao acessar o link [{url_direta}]: {e}"
-
 # =============================================================================
 # 5. INTERFACE DO USUÁRIO (STREAMLIT UI)
 # =============================================================================
