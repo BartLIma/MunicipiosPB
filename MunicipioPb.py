@@ -14,13 +14,12 @@ st.set_page_config(
 )
 
 FAMUP_BASE_URL = "https://famup.org.br/paraiba"
-
 HTTP_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
 # =============================================================================
-# 2. TRANSFORMAÇÃO DO NOME
+# 2. TRANSFORMAÇÃO DO NOME (GERAÇÃO DA URL)
 # =============================================================================
 def normalizar_slug_municipio(nome_municipio: str) -> str:
     slug = nome_municipio.strip().lower()
@@ -34,7 +33,7 @@ def normalizar_slug_municipio(nome_municipio: str) -> str:
     return slug
 
 # =============================================================================
-# 3. CONSTRUÇÃO DIRETA DO LINK E CAPTURA DE DADOS
+# 3. EXTRAÇÃO DE DADOS POR VARREDURA TEXTUAL DIRETAL
 # =============================================================================
 def extrair_dados_famup(municipio: str) -> dict | str:
     slug = normalizar_slug_municipio(municipio)
@@ -51,7 +50,7 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
-        # Mapeamento flexível dos termos que aparecem antes dos valores
+        # Mapeamento exato de acordo com o texto bruto retornado pelo site
         mapeamento = {
             'razão social': 'Razão Social',
             'endereço': 'Endereço',
@@ -61,31 +60,32 @@ def extrair_dados_famup(municipio: str) -> dict | str:
             'prefeito': 'Prefeito Atual'
         }
         
-        # Estratégia de Varredura Ampla por Tags do Site
-        tags_texto = soup.find_all(['h5', 'h4', 'p', 'b', 'strong', 'div'])
+        # Quebra todo o texto visível da página em linhas limpas
+        linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
         
-        for tag in tags_texto:
-            texto_tag = tag.text.strip().lower() if tag.text else ""
+        # Varredura inteligente de texto por proximidade de linhas
+        for i, linha in enumerate(linhas_pagina):
+            linha_lower = linha.lower()
             
             for termo_html, label_interface in mapeamento.items():
-                # Se encontrarmos o rótulo (ex: "prefeito") dentro do texto da tag
-                if termo_html in texto_tag and len(texto_tag) < 30:
-                    # O valor real está no próximo elemento de texto disponível no HTML
-                    proxima_tag = tag.find_next()
-                    if proxima_tag:
-                        valor = proxima_tag.text.strip()
-                        
-                        # Filtro de Segurança para descartar o menu lateral de 223 cidades
-                        if "Água Branca" in valor and len(valor) > 200:
-                            continue
-                        
-                        # Limpeza profunda de espaços e formatação
-                        valor_limpo = re.sub(r'\s+', ' ', valor).strip()
-                        valor_limpo = re.sub(r'\s*\|\s*$', '', valor_limpo)
-                        
-                        # Armazena se houver conteúdo válido e evita sobrescrever com vazios
-                        if valor_limpo and label_interface not in dados_coletados:
-                            dados_coletados[label_interface] = valor_limpo
+                # Se achamos a linha com o rótulo exato
+                if linha_lower == termo_html:
+                    # Olhamos até 4 linhas para baixo para achar o valor correspondente
+                    for j in range(1, 5):
+                        if i + j < len(linhas_pagina):
+                            candidato_valor = linhas_pagina[i + j]
+                            
+                            # Filtro: O valor não pode ser o menu lateral nem outro rótulo conhecido
+                            if "Água Branca" in candidato_valor or candidato_valor.lower() in mapeamento:
+                                continue
+                            
+                            # Filtro específico para o campo de redes sociais ou links gerais vazios
+                            if candidato_valor in ['-', 'Bandeira', 'Dados Gerais']:
+                                continue
+                                
+                            # Se passou nos filtros, salvamos e paramos a busca deste campo
+                            dados_coletados[label_interface] = candidato_valor
+                            break
 
         if not dados_coletados:
             return f"⚠️ O link existia ({url_direta}), mas os dados internos não puderam ser processados."
@@ -99,22 +99,21 @@ def extrair_dados_famup(municipio: str) -> dict | str:
 # 4. INTERFACE DO USUÁRIO (STREAMLIT)
 # =============================================================================
 st.title("🗺️ Painel de Consulta - Municípios da Paraíba")
-st.markdown("Insira o nome de um município para montar o link e extrair seus dados da FAMUP.")
+st.markdown("Insira o nome de um município para acessar diretamente os dados na FAMUP.")
 
 nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Sapé")
 
 if st.button("Buscar Informações", type="primary"):
     if nome_busca.strip():
-        # st.empty limpa qualquer resquício visual antigo evitando o bug do React
         st.empty()
         
-        with st.spinner("Gerando endereço institucional e acessando dados..."):
+        with st.spinner("Conectando ao endereço e processando dados..."):
             resultado = extrair_dados_famup(nome_busca)
         
         if isinstance(resultado, dict):
             st.success("📊 Dados recuperados com sucesso!")
             
-            # Exibição simples sem colunas para blindar contra o erro 'removeChild' do Streamlit
+            # Exibição direta e limpa na tela
             st.markdown(f"### 🏢 {resultado.get('Razão Social', nome_busca.upper())}")
             st.markdown(f"👑 **Prefeito(a):** {resultado.get('Prefeito Atual', 'Não informado')}")
             st.markdown(f"📍 **Endereço:** {resultado.get('Endereço', 'Não informado')}")
