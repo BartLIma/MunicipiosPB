@@ -117,7 +117,7 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         elif response.status_code != 200:
             return f"❌ Erro de conexão com a FAMUP (Código HTTP: {response.status_code})."
         
-                soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
         # Captura da Bandeira Oficial via SisGF
