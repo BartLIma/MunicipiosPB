@@ -10,87 +10,67 @@ from bs4 import BeautifulSoup
 st.set_page_config(
     page_title="Consulta FAMUP - PB",
     page_icon="🗺️",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    layout="centered"
 )
 
-# Constantes do projeto
-FAMUP_BASE_URL = "https://famup.org.br"
+# A base do link que você especificou
+FAMUP_BASE_URL = "https://famup.org.br/paraiba"
+
 HTTP_HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/120.0.0.0 Safari/537.36'
-    )
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
 # =============================================================================
-# 2. FUNÇÕES DE TRATAMENTO E PROCESSAMENTO DE TEXTO
+# 2. TRANSFORMAÇÃO DO NOME (IGUAL AO SEU PROCESSO VISUAL)
 # =============================================================================
 def normalizar_slug_municipio(nome_municipio: str) -> str:
     """
-    Transforma o nome do município no padrão correto da URL da FAMUP (Sempre em minúsculas).
-    Exemplo: "Aguiar" -> "aguiar" | "Campina Grande" -> "campina-grande"
+    Transforma o nome exatamente para o formato do endereço final da FAMUP.
+    Exemplo: "Aguiar" -> "aguiar" | "Alagoa Grande" -> "alagoa-grande"
     """
-    # 1. Forçar letras minúsculas e limpar espaços nas pontas
+    # Força minúsculas e limpa espaços nas pontas
     slug = nome_municipio.strip().lower()
     
-    # 2. Remover acentuação utilizando normalização Unicode
+    # Remove acentos (Sapé -> sape)
     slug = ''.join(
-        caractere for caractere in unicodedata.normalize('NFD', slug)
-        if unicodedata.category(caractere) != 'Mn'
+        c for c in unicodedata.normalize('NFD', slug)
+        if unicodedata.category(c) != 'Mn'
     )
     
-    # 3. Substituir espaços por hifens (para cidades com nomes compostos)
+    # Substitui espaços por hifens (Alagoa Grande -> alagoa-grande)
     slug = slug.replace(" ", "-")
     
-    # 4. Remover apóstrofos, aspas e outros caracteres especiais inválidos na URL
+    # Remove caracteres especiais como apóstrofos (Mãe D'Água -> mae-dagua)
     slug = re.sub(r'[^a-z0-9\-]', '', slug)
     
-    # 5. Evitar múltiplos hifens seguidos
+    # Remove múltiplos hifens que possam surgir por erro de digitação
     slug = re.sub(r'-+', '-', slug)
     
     return slug
 
-
-
-def limpar_texto_extraido(texto: str) -> str:
-    """
-    Remove quebras de linha excessivas, tabulações e caracteres residuais de formatação.
-    """
-    if not texto:
-        return ""
-    # Substitui qualquer sequência de espaços/quebras de linha por um único espaço
-    texto_limpo = re.sub(r'\s+', ' ', texto).strip()
-    # Remove barras verticais soltas comuns em listas de telefones/emails da FAMUP
-    texto_limpo = re.sub(r'\s*\|\s*$', '', texto_limpo)
-    return texto_limpo
-
 # =============================================================================
-# 3. NÚCLEO DE EXTRAÇÃO DE DADOS (WEB SCRAPING)
+# 3. CONSTRUÇÃO DIRETA DO LINK E CAPTURA DE DADOS
 # =============================================================================
 def extrair_dados_famup(municipio: str) -> dict | str:
-    """
-    Realiza a requisição HTTP e raspa os dados institucionais do município do site da FAMUP.
-    Returns:
-        dict: Com os dados limpos se a extração for bem-sucedida.
-        str: Mensagem de erro caso ocorra alguma falha.
-    """
+    # Transforma o nome digitado para o formato do link (ex: aguiar ou alagoa-grande)
     slug = normalizar_slug_municipio(municipio)
-    url_alvo = f"{FAMUP_BASE_URL}/{slug}/"
+    
+    # Monta o endereço colando os pedaços, exatamente como você sugeriu
+    url_direta = f"{FAMUP_BASE_URL}/{slug}/"
     
     try:
-        response = requests.get(url_alvo, headers=HTTP_HEADERS, timeout=12)
+        # Faz a visita direta ao endereço final
+        response = requests.get(url_direta, headers=HTTP_HEADERS, timeout=10)
         
         if response.status_code == 404:
-            return f"❌ O município '{municipio}' não foi encontrado no portal da FAMUP. Verifique a grafia."
+            return f"❌ O endereço direto não foi encontrado no servidor da FAMUP.\nLink tentado: {url_direta}"
         elif response.status_code != 200:
-            return f"❌ Erro de comunicação com o servidor da FAMUP (Código HTTP: {response.status_code})."
+            return f"❌ Erro de conexão com o portal da FAMUP (Código: {response.status_code})."
         
         soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
-        # Dicionário de mapeamento: 'Texto buscado no HTML': 'Rótulo exibido na Interface'
+        # Mapeamento com os termos em caixa mista, exatamente como estão escritos no HTML do site
         mapeamento_campos = {
             'Razão social': 'Razão Social',
             'Endereço': 'Endereço',
@@ -100,106 +80,73 @@ def extrair_dados_famup(municipio: str) -> dict | str:
             'Prefeito': 'Prefeito Atual'
         }
         
+        # Analisa o texto completo da página de forma flexível
         for termo_html, rotulo_interface in mapeamento_campos.items():
-            # Localiza a tag que contém exatamente o título do campo procurado
-            tag_rotulo = soup.find(
-                lambda tag: tag.name in ['h5', 'h4', 'p', 'b', 'strong', 'div'] 
-                and termo_html.lower() == tag.text.strip().lower()
-            )
+            # Procura qualquer tag que contenha o texto do rótulo de forma aproximada (ignorando maiúsculas/minúsculas da tag)
+            tag_rotulo = soup.find(lambda tag: tag.name in ['h5', 'h4', 'p', 'b', 'strong', 'div'] 
+                                   and tag.text and termo_html.lower() in tag.text.lower())
             
             if tag_rotulo:
-                # O conteúdo informativo reside na tag irmã imediatamente seguinte
                 tag_valor = tag_rotulo.find_next()
                 if tag_valor:
-                    conteudo = tag_valor.text
+                    conteudo = tag_valor.text.strip()
                     
-                    # FILTRO DE SEGURANÇA (Anti-Sujeira):
-                    # Se o robô capturar acidentalmente a lista de links do menu lateral de municípios,
-                    # o conteúdo será imenso e conterá nomes de outras cidades conhecidas.
-                    if "Água Branca" in conteudo and len(conteudo) > 400:
+                    # Filtro para ignorar caso ele pegue por engano a lista lateral de municípios
+                    if "Água Branca" in conteudo and len(conteudo) > 300:
                         continue
-                        
-                    dados_coletados[rotulo_interface] = limpar_texto_extraido(conteudo)
+                    
+                    # Limpa espaços duplos e quebras de linha que vinham com a "sujeira"
+                    conteudo_limpo = re.sub(r'\s+', ' ', conteudo).strip()
+                    conteudo_limpo = re.sub(r'\s*\|\s*$', '', conteudo_limpo)
+                    
+                    dados_coletados[rotulo_interface] = conteudo_limpo
         
         if not dados_coletados:
-            return "⚠️ A página do município existe, mas a estrutura interna do site mudou e o robô não pôde ler os dados."
+            return f"⚠️ O link existia ({url_direta}), mas o robô não conseguiu isolar os dados estruturados dentro dele."
             
         return dados_coletados
 
-    except requests.exceptions.Timeout:
-        return "❌ O servidor da FAMUP demorou muito para responder (Tempo limite esgotado)."
-    except requests.exceptions.ConnectionError:
-        return "❌ Falha de rede ao tentar conectar com a FAMUP. Verifique a internet do servidor."
-    except Exception as erro:
-        return f"❌ Ocorreu um erro inesperado no processamento: {erro}"
+    except Exception as e:
+        return f"❌ Erro ao tentar acessar o link [{url_direta}]: {e}"
 
 # =============================================================================
-# 4. INTERFACE GRÁFICA (STREAMLIT UI)
+# 4. INTERFACE DO USUÁRIO (STREAMLIT)
 # =============================================================================
-def renderizar_interface():
-    # Cabeçalho da página
-    st.title("🗺️ Painel de Consulta - Municípios da Paraíba")
-    st.markdown(
-        "Esta aplicação extrai e limpa de forma automatizada os dados "
-        "institucionais atualizados mantidos pela **FAMUP**."
-    )
-    st.divider()
+st.title("🗺️ Painel de Consulta - Municípios da Paraíba")
+st.markdown("Insira o nome de um município para montar o link e extrair seus dados da FAMUP.")
 
-    # Campo de entrada de dados
-    nome_busca = st.text_input(
-        label="Digite o nome do município para pesquisar:",
-        placeholder="Ex: Aguiar, Sapé, Campina Grande, Patos",
-        help="Não se preocupe com acentos ou letras maiúsculas, o sistema trata o texto automaticamente."
-    )
-    
-    # Botão de disparo
-    if st.button("Buscar Informações", type="primary", use_container_width=True):
-        if not nome_busca.strip():
-            st.warning("⚠️ O campo de busca não pode estar vazio. Digite o nome de uma cidade.")
-            return
+# Campo de texto para o usuário digitar
+nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Sapé")
 
-        # Execução do Scraping com indicador visual de progresso
-        with st.spinner(f"Consultando base de dados da FAMUP para '{nome_busca.title()}'..."):
+if st.button("Buscar Informações", type="primary"):
+    if nome_busca.strip():
+        with st.spinner("Gerando endereço institucional e acessando dados..."):
             resultado = extrair_dados_famup(nome_busca)
         
-        # Renderização condicional do resultado
         if isinstance(resultado, dict):
             st.success("📊 Dados recuperados com sucesso!")
             
-            # Container visual estilizado (Moldura/Cartão)
             with st.container(border=True):
-                # Título Principal do Cartão
-                razao_social = resultado.get('Razão Social', nome_busca.upper())
-                st.subheader(f"🏢 {razao_social}")
-                
-                # Bloco de destaque para o Gestor atual
-                prefeito = resultado.get('Prefeito Atual', 'Não informado')
-                st.markdown(f"### 👑 Prefeito(a): **{prefeito}**")
+                st.subheader(f"🏢 {resultado.get('Razão Social', nome_busca.upper())}")
+                st.markdown(f"### 👑 Prefeito(a): **{resultado.get('Prefeito Atual', 'Não informado')}**")
                 st.divider()
                 
-                # Organização dos dados restantes em duas colunas para melhor aproveitamento de tela
                 col1, col2 = st.columns(2)
-                
                 with col1:
-                    st.markdown(f"📍 **Endereço:**\n{resultado.get('Endereço', 'Não disponível')}")
-                    st.markdown(f"📞 **Telefones:**\n{resultado.get('Telefones', 'Não disponível')}")
+                    st.markdown(f"📍 **Endereço:**\n{resultado.get('Endereço', 'Não informado')}")
+                    st.markdown(f"📞 **Telefones:**\n{resultado.get('Telefones', 'Não informado')}")
                 
                 with col2:
-                    st.markdown(f"✉️ **E-mails:**\n{resultado.get('E-mails de Contato', 'Não disponível')}")
+                    st.markdown(f"✉️ **E-mails:**\n{resultado.get('E-mails de Contato', 'Não informado')}")
                     
-                    # Tratamento inteligente e conversão do site em link real clicável
-                    site_raw = resultado.get('Site Oficial')
-                    if site_raw:
-                        # Limpa possíveis palavras residuais como o termo 'site' colado
-                        site_limpo = site_raw.lower().replace("site", "").strip()
+                    site = resultado.get('Site Oficial')
+                    if site:
+                        site_limpo = site.lower().replace("site", "").strip()
                         url_completa = site_limpo if site_limpo.startswith("http") else f"https://{site_limpo}"
                         st.markdown(f"🌐 **Site Oficial:**\n[{site_limpo}]({url_completa})")
                     else:
-                        st.markdown("🌐 **Site Oficial:**\nNão disponível")
+                        st.markdown("🌐 **Site Oficial:**\nNão informado")
         else:
-            # Exibe a mensagem de erro tratada em uma caixa vermelha
             st.error(resultado)
-
-# Ponto de entrada padrão do script Python
-if __name__ == "__main__":
-    renderizar_interface()
+    else:
+        st.warning("⚠️ Digite o nome de um município para realizar a operação.")
