@@ -1,6 +1,7 @@
 import re
 import unicodedata
 import requests
+import pandas as pd
 import streamlit as st
 from bs4 import BeautifulSoup
 
@@ -13,13 +14,31 @@ st.set_page_config(
     layout="centered"
 )
 
-FAMUP_BASE_URL = "https://famup.org.br/paraiba"
+FAMUP_BASE_URL = "https://famup.org.br"
 HTTP_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
 # =============================================================================
-# 2. TRANSFORMAÇÃO DO NOME (GERAÇÃO DA URL)
+# 2. FUNÇÃO PARA CARREGAR O ARQUIVO DE COORDENADAS CSV
+# =============================================================================
+@st.cache_data
+def carregar_banco_coordenadas():
+    """
+    Carrega o arquivo CSV criado pelo usuário no repositório.
+    O uso do @st.cache_data faz com que o Streamlit leia o arquivo apenas uma vez.
+    """
+    try:
+        # Lê o CSV e garante que a coluna de busca seja tratada como string
+        df = pd.read_csv("coordenadas.csv")
+        df['municipio'] = df['municipio'].astype(str).str.strip().str.lower()
+        return df
+    except Exception as e:
+        st.error(f"⚠️ Erro ao carregar o arquivo 'coordenadas.csv': {e}")
+        return None
+
+# =============================================================================
+# 3. TRANSFORMAÇÃO DO NOME (GERAÇÃO DA URL E BUSCA NO CSV)
 # =============================================================================
 def normalizar_slug_municipio(nome_municipio: str) -> str:
     slug = nome_municipio.strip().lower()
@@ -33,7 +52,7 @@ def normalizar_slug_municipio(nome_municipio: str) -> str:
     return slug
 
 # =============================================================================
-# 3. EXTRAÇÃO DE DADOS E DA BANDEIRA DO SISGF
+# 4. EXTRAÇÃO DE DADOS TEXTUAIS E BANDEIRA
 # =============================================================================
 def extrair_dados_famup(municipio: str) -> dict | str:
     slug = normalizar_slug_municipio(municipio)
@@ -50,22 +69,11 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
-        # --- SOLUÇÃO CIRÚRGICA PARA A BANDEIRA (SisGF) ---
-        # Varre todas as tags <img> da página procurando links que apontem para o SisGF ou usem extensão .PNG
+        # Captura da Bandeira Oficial via SisGF
         tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
         if tag_img and tag_img.get('src'):
             dados_coletados['url_bandeira'] = tag_img['src']
         
-        # Se falhar, tentamos buscar pelo atributo alt ou classe de imagem
-        if 'url_bandeira' not in dados_coletados:
-            imagens = soup.find_all('img')
-            for img in imagens:
-                src_link = img.get('src', '')
-                if 'prefeitura_municipal_de' in src_link.lower() or src_link.endswith('.PNG'):
-                    dados_coletados['url_bandeira'] = src_link
-                    break
-
-        # Mapeamento tradicional de rótulos textuais
         mapeamento = {
             'razão social': 'Razão Social',
             'endereço': 'Endereço',
@@ -98,12 +106,15 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         return f"❌ Erro ao tentar acessar o link [{url_direta}]: {e}"
 
 # =============================================================================
-# 4. INTERFACE DO USUÁRIO (STREAMLIT UI)
+# 5. INTERFACE DO USUÁRIO (STREAMLIT UI)
 # =============================================================================
 st.title("🗺️ Painel de Consulta - Municípios da Paraíba")
 st.markdown("Insira o nome de um município para acessar diretamente os dados na FAMUP.")
 
-nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Alcantil")
+# Carrega o banco de dados geográfico em segundo plano
+df_coordenadas = carregar_banco_coordenadas()
+
+nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Sapé")
 
 if st.button("Buscar Informações", type="primary"):
     if nome_busca.strip():
@@ -115,14 +126,14 @@ if st.button("Buscar Informações", type="primary"):
         if isinstance(resultado, dict):
             st.success("📊 Dados recuperados com sucesso!")
             
-            # Divide a tela para colocar a bandeira e as informações lado a lado de forma elegante
-            col_bandeira, col_info = st.columns([1, 2])
+            # Divide a tela para colocar a bandeira e as informações lado a lado
+            col_bandeira, col_info = st.columns()
             
             with col_bandeira:
                 if 'url_bandeira' in resultado:
-                    st.image(resultado['url_bandeira'], caption=f"Bandeira Oficial", use_container_width=True)
+                    st.image(resultado['url_bandeira'], caption="Bandeira Oficial", use_container_width=True)
                 else:
-                    st.info("🏳️ Bandeira não localizada no HTML.")
+                    st.info("🏳️ Bandeira não localizada.")
             
             with col_info:
                 st.markdown(f"### 🏢 {resultado.get('Razão Social', nome_busca.upper())}")
@@ -139,21 +150,34 @@ if st.button("Buscar Informações", type="primary"):
                 else:
                     st.markdown("🌐 **Site Oficial:** Não informado")
             
-            # --- SEÇÃO DO MAPA GEOGRÁFICO NATIVO ---
+            # --- RENDERIZAÇÃO DO MAPA NATIVO BASEADO NO CSV ---
             st.markdown("---")
-            st.markdown(f"📍 **Localização Geográfica de {nome_busca.title()} - PB:**")
+            slug_atual = normalizar_slug_municipio(nome_busca)
             
-            # Incorporação limpa e interativa do mapa via iframe
-            url_mapa = f"https://google.com{nome_busca.replace(' ', '%20')},Paraiba,Brasil&t=&z=12&ie=UTF8&iwloc=&output=embed"
-            st.components.v1.iframe(url_mapa, height=400, scrolling=False)
-
+            if df_coordenadas is not None and not df_coordenadas.empty:
+                # Procura o município correspondente dentro da planilha CSV
+                linha_municipio = df_coordenadas[df_coordenadas['municipio'] == slug_atual]
+                
+                if not linha_municipio.empty:
+                    lat = float(linha_municipio.iloc[0]['latitude'])
+                    lon = float(linha_municipio.iloc[0]['longitude'])
+                    
+                    st.markdown(f"📍 **Mapa de Localização de {nome_busca.title()} (Coordenadas do Arquivo):**")
+                    
+                    # Monta o DataFrame exigido pelo st.map do Streamlit
+                    dados_mapa = pd.DataFrame({'lat': [lat], 'lon': [lon]})
+                    st.map(dados_mapa, zoom=12)
+                else:
+                    st.warning(f"⚠️ Coordenadas de '{nome_busca.title()}' não foram encontradas no seu arquivo 'coordenadas.csv'.")
+            else:
+                st.error("❌ Não foi possível carregar o mapa porque o arquivo 'coordenadas.csv' está ausente ou inválido.")
         else:
             st.error(resultado)
     else:
         st.warning("⚠️ Digite o nome de um município para realizar a operação.")
 
 # =============================================================================
-# 5. RODAPÉ DE AUTORIA E FONTE INSTITUCIONAL
+# 6. RODAPÉ DE AUTORIA E FONTE INSTITUCIONAL
 # =============================================================================
 st.markdown("---")
 slug_atual = normalizar_slug_municipio(nome_busca) if nome_busca.strip() else ""
