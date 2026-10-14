@@ -57,5 +57,3 @@
     "tavares": (-7.63, -37.89), "teixeira": (-7.22, -37.25), "tenorio": (-6.93, -36.63), "triunfo": (-6.57, -38.53),
     "uirauna": (-6.52, -38.41), "umburana": (-6.68, -36.16), "varzea": (-6.88, -36.83), "vieiropolis": (-6.79, -38.24),
     "zabele": (-7.97, -37.10)
-    
-    if busca_termo.strip():
