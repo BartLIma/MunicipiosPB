@@ -50,16 +50,20 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
-        # --- PLANO A: TENTATIVA DE EXTRAÇÃO DA BANDEIRA ---
-        # Procura por qualquer tag de imagem que possua 'bandeira' no nome do arquivo ou atributo
-        tag_bandeira = soup.find('img', src=re.compile(r'bandeira', re.IGNORECASE))
-        if tag_bandeira and tag_bandeira.get('src'):
-            url_img = tag_bandeira['src']
-            # Garante que a URL da imagem esteja completa se for relativa
-            if url_img.startswith('/'):
-                dados_coletados['url_bandeira'] = f"https://famup.org.br{url_img}"
-            else:
-                dados_coletados['url_bandeira'] = url_img
+        # --- PLANO B DA BANDEIRA: Busca por Proximidade Textual ---
+        # Procura a tag que contém a palavra literal "Bandeira"
+        tag_texto_bandeira = soup.find(lambda tag: tag.name in ['h5', 'h4', 'p', 'b', 'strong', 'div'] 
+                                       and tag.text and "bandeira" == tag.text.strip().lower())
+        
+        if tag_texto_bandeira:
+            # Encontra a primeira tag <img> localizada após a palavra "Bandeira"
+            proxima_img = tag_texto_bandeira.find_next('img')
+            if proxima_img and proxima_img.get('src'):
+                url_img = proxima_img['src']
+                if url_img.startswith('/'):
+                    dados_coletados['url_bandeira'] = f"https://famup.org.br{url_img}"
+                else:
+                    dados_coletados['url_bandeira'] = url_img
 
         # Mapeamento tradicional de rótulos textuais
         mapeamento = {
@@ -82,7 +86,7 @@ def extrair_dados_famup(municipio: str) -> dict | str:
                 if linha_lower == termo_html:
                     for j in range(1, 5):
                         if i + j < len(linhas_pagina):
-                            candidato_valor = lines_candidato = linhas_pagina[i + j]
+                            candidato_valor = linhas_pagina[i + j]
                             if "Água Branca" in candidato_valor or candidato_valor.lower() in mapeamento:
                                 continue
                             if candidato_valor in ['-', 'Bandeira', 'Dados Gerais']:
@@ -94,12 +98,12 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         if not dados_coletados:
             return f"⚠️ O link existia ({url_direta}), mas os dados internos não puderam ser processados."
             
-        # Adiciona a URL direta consultada aos dados para usar no rodapé
         dados_coletados['url_fonte'] = url_direta
         return dados_coletados
 
     except Exception as e:
         return f"❌ Erro ao tentar acessar o link [{url_direta}]: {e}"
+
 
 # =============================================================================
 # 4. INTERFACE DO USUÁRIO (STREAMLIT)
