@@ -157,7 +157,7 @@ def extrair_dados_famup(municipio: str) -> dict | str:
 # 5. INTERFACE DO USUÁRIO (STREAMLIT UI)
 # =============================================================================
 st.title("🗺️ Painel de Consulta - Municípios da Paraíba")
-st.markdown("Insira o nome de um município para acessar diretamente os dados na FAMUP.")
+"""" st.markdown("Insira o nome de um município para acessar diretamente os dados na FAMUP.")
 
 nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Campina Grande")
 
