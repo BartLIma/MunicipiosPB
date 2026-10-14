@@ -200,7 +200,7 @@ if st.button("Buscar Informações", type="primary"):
             
             if chave_coordenada in COORDENADAS_MUNICICIPIOS:
                 lat, lon = COORDENADAS_MUNICICIPIOS[chave_coordenada]
-                st.markdown(f"📍 **Mapa de Localização de {nome_busca.title()} :**")
+                st.markdown(f"📍 **Mapa de Localização do Município de {nome_busca.title()} :**")
                 
                 # O st.map exige as coordenadas estruturadas dentro de um DataFrame do Pandas
                 dados_mapa = pd.DataFrame({'lat': [lat], 'lon': [lon]})
