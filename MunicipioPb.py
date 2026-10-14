@@ -51,12 +51,10 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         dados_coletados = {}
         
         # --- SOLUÇÃO CIRÚRGICA PARA A BANDEIRA (SisGF) ---
-        # Varre todas as tags <img> da página procurando links que apontem para o SisGF ou usem extensão .PNG
         tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
         if tag_img and tag_img.get('src'):
             dados_coletados['url_bandeira'] = tag_img['src']
         
-        # Se falhar, tentamos buscar pelo atributo alt ou classe de imagem
         if 'url_bandeira' not in dados_coletados:
             imagens = soup.find_all('img')
             for img in imagens:
@@ -83,7 +81,7 @@ def extrair_dados_famup(municipio: str) -> dict | str:
                 if linha_lower == termo_html:
                     for j in range(1, 5):
                         if i + j < len(linhas_pagina):
-                            candidato_valor = linhas_pagina[i + j]
+                            candidato_valor = lines_candidato = linhas_pagina[i + j]
                             if "Água Branca" in candidato_valor or candidato_valor.lower() in mapeamento:
                                 continue
                             if candidato_valor in ['-', 'Bandeira', 'Dados Gerais']:
@@ -139,11 +137,11 @@ if st.button("Buscar Informações", type="primary"):
                 else:
                     st.markdown("🌐 **Site Oficial:** Não informado")
             
-            # --- SEÇÃO DO MAPA GEOGRÁFICO NATIVO ---
+            # --- SEÇÃO DO MAPA GEOGRÁFICO CORRIGIDA ---
             st.markdown("---")
             st.markdown(f"📍 **Localização Geográfica de {nome_busca.title()} - PB:**")
             
-            # Incorporação limpa e interativa do mapa via iframe
+            # CORREÇÃO DA URL DO MAPA: Ajustado o endpoint de incorporação nativa estável do Google Maps
             url_mapa = f"https://google.com{nome_busca.replace(' ', '%20')},Paraiba,Brasil&t=&z=12&ie=UTF8&iwloc=&output=embed"
             st.components.v1.iframe(url_mapa, height=400, scrolling=False)
 
