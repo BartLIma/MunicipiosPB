@@ -117,55 +117,45 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         elif response.status_code != 200:
             return f"❌ Erro de conexão com a FAMUP (Código HTTP: {response.status_code})."
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+               soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
         # Captura da Bandeira Oficial via SisGF
         tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
         if tag_img and tag_img.get('src'):
             dados_coletados['url_bandeira'] = tag_img['src']
-        
-        mapeamento = {
-            'razão social': 'Razão Social',
-            'endereço': 'Endereço',
-            'site': 'Site Oficial',
-            'telefones': 'Telefones',
-            'emails': 'E-mails de Contato',
-            'prefeito': 'Prefeito Atual'
-        }
-        
-        # Varredura inteligente de texto puro por quebra de linha
-        linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
-        for i, linha_servidor in enumerate(linhas_pagina):
-            linha_lower = linha_servidor.lower()
-            for termo_html, label_interface in mapeamento.items():
-                if linha_lower == termo_html:
-                    for j in range(1, 5):
-                        if i + j < len(linhas_pagina):
-                            candidato_valor = linhas_pagina[i + j]
-                            if "Água Branca" in candidato_valor or candidato_valor.lower() in mapeamento:
-                                continue
-                            if candidato_valor in ['-', 'Bandeira', 'Dados Gerais']:
-                                continue
-                            dados_coletados[label_interface] = candidato_valor
-                            break
-        return dados_coletados
-    except Exception as e:
-        return f"❌ Erro ao acessar o link [{url_direta}]: {e}"
+            
         # -------------------------------------------------------------
-        # DECODIFICADOR DE EMAIL DA CLOUDFLARE (Solução para [email protected])
+        # NOVA ABORDAGEM DE BUSCA ROBUSTA (Baseada em texto e rótulos)
         # -------------------------------------------------------------
+        
+        # Função auxiliar para limpar e achar valores próximos
+        def buscar_campo(termos_chave):
+            for termo in termos_chave:
+                elemento = soup.find(string=re.compile(f"^{termo}$", re.IGNORECASE))
+                if elemento:
+                    pai = elemento.find_parent()
+                    if pai:
+                        texto_completo = pai.get_text(separator=" ", strip=True)
+                        for t in termos_chave:
+                            texto_completo = re.sub(t, "", texto_completo, flags=re.IGNORECASE)
+                        valor_limpo = texto_completo.replace(":", "").strip()
+                        if valor_limpo and len(valor_limpo) > 2:
+                            return valor_limpo
+            return None
+
+        # =============================================================
+        # [AQUI ENTRA A ALTERAÇÃO] DECODIFICADOR DE EMAIL CLOUDFLARE
+        # =============================================================
         def decodificar_cloudflare_email(cf_hex):
             try:
-                # O primeiro par de caracteres é a chave de criptografia
                 k = int(cf_hex[:2], 16)
-                # O restante são os caracteres do e-mail mascarados com XOR
                 email = ''.join([chr(int(cf_hex[i:i+2], 16) ^ k) for i in range(2, len(cf_hex), 2)])
                 return email
             except Exception:
                 return None
 
-        # Busca por qualquer tag que contenha o atributo de proteção da Cloudflare
+        # Busca por tags com a proteção da Cloudflare
         tags_com_email = soup.find_all(attrs={"data-cfemail": True})
         emails_decodificados = []
 
@@ -176,11 +166,10 @@ def extrair_dados_famup(municipio: str) -> dict | str:
                 emails_decodificados.append(email_real)
 
         if emails_decodificados:
-            # Filtra duplicados mantendo a ordem
             emails_unicos = list(dict.fromkeys(emails_decodificados))
             dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
         else:
-            # Mantém seu fallback original caso o site mude ou não use Cloudflare em alguma página
+            # Fallback caso o site mude ou não use Cloudflare em alguma página
             link_email = soup.find('a', href=re.compile(r'^mailto:'))
             if link_email and '[email protected]' not in link_email.get_text():
                 dados_coletados['E-mails de Contato'] = link_email.get_text(strip=True)
@@ -189,6 +178,33 @@ def extrair_dados_famup(municipio: str) -> dict | str:
                 if possiveis_emails:
                     emails_unicos = list(dict.fromkeys(possiveis_emails))
                     dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
+        # =============================================================
+
+        # Mapeamento dos demais campos usando a lógica anterior ajustada
+        mapeamento = {
+            'razão social': 'Razão Social',
+            'endereço': 'Endereço',
+            'site': 'Site Oficial',
+            'telefones': 'Telefones',
+            'prefeito': 'Prefeito Atual'
+        }
+        
+        linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
+        for i, linha_servidor in enumerate(linhas_pagina):
+            linha_lower = linha_servidor.lower()
+            for termo_html, label_interface in mapeamento.items():
+                if termo_html in linha_lower:
+                    for j in range(1, 4):
+                        if i + j < len(linhas_pagina):
+                            candidato_valor = \
+                            linhas_pagina[i + j]
+                            if candidato_valor in ['-', 'Bandeira', 'Dados Gerais'] or '@' in candidato_valor:
+                                continue
+                            dados_coletados[label_interface] = candidato_valor
+                            break
+                            
+        return dados_coletados
+
 
 # =============================================================================
 # 5. INTERFACE DO USUÁRIO (STREAMLIT UI)
