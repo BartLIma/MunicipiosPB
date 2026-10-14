@@ -33,7 +33,7 @@ def normalizar_slug_municipio(nome_municipio: str) -> str:
     return slug
 
 # =============================================================================
-# 3. EXTRAÇÃO DE DADOS E LINKS DE IMAGEM
+# 3. EXTRAÇÃO DE DADOS E DA BANDEIRA DO SISGF
 # =============================================================================
 def extrair_dados_famup(municipio: str) -> dict | str:
     slug = normalizar_slug_municipio(municipio)
@@ -50,20 +50,20 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
-        # --- PLANO B DA BANDEIRA: Busca por Proximidade Textual ---
-        # Procura a tag que contém a palavra literal "Bandeira"
-        tag_texto_bandeira = soup.find(lambda tag: tag.name in ['h5', 'h4', 'p', 'b', 'strong', 'div'] 
-                                       and tag.text and "bandeira" == tag.text.strip().lower())
+        # --- SOLUÇÃO CIRÚRGICA PARA A BANDEIRA (SisGF) ---
+        # Varre todas as tags <img> da página procurando links que apontem para o SisGF ou usem extensão .PNG
+        tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
+        if tag_img and tag_img.get('src'):
+            dados_coletados['url_bandeira'] = tag_img['src']
         
-        if tag_texto_bandeira:
-            # Encontra a primeira tag <img> localizada após a palavra "Bandeira"
-            proxima_img = tag_texto_bandeira.find_next('img')
-            if proxima_img and proxima_img.get('src'):
-                url_img = proxima_img['src']
-                if url_img.startswith('/'):
-                    dados_coletados['url_bandeira'] = f"https://famup.org.br{url_img}"
-                else:
-                    dados_coletados['url_bandeira'] = url_img
+        # Se falhar, tentamos buscar pelo atributo alt ou classe de imagem
+        if 'url_bandeira' not in dados_coletados:
+            imagens = soup.find_all('img')
+            for img in imagens:
+                src_link = img.get('src', '')
+                if 'prefeitura_municipal_de' in src_link.lower() or src_link.endswith('.PNG'):
+                    dados_coletados['url_bandeira'] = src_link
+                    break
 
         # Mapeamento tradicional de rótulos textuais
         mapeamento = {
@@ -75,13 +75,10 @@ def extrair_dados_famup(municipio: str) -> dict | str:
             'prefeito': 'Prefeito Atual'
         }
         
-        # Quebra o texto visível da página em linhas limpas
         linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
         
-        # Varredura inteligente de texto por proximidade de linhas
         for i, linha in enumerate(linhas_pagina):
             linha_lower = linha.lower()
-            
             for termo_html, label_interface in mapeamento.items():
                 if linha_lower == termo_html:
                     for j in range(1, 5):
@@ -94,24 +91,19 @@ def extrair_dados_famup(municipio: str) -> dict | str:
                                 
                             dados_coletados[label_interface] = candidato_valor
                             break
-
-        if not dados_coletados:
-            return f"⚠️ O link existia ({url_direta}), mas os dados internos não puderam ser processados."
-            
-        dados_coletados['url_fonte'] = url_direta
+                            
         return dados_coletados
 
     except Exception as e:
         return f"❌ Erro ao tentar acessar o link [{url_direta}]: {e}"
 
-
 # =============================================================================
-# 4. INTERFACE DO USUÁRIO (STREAMLIT)
+# 4. INTERFACE DO USUÁRIO (STREAMLIT UI)
 # =============================================================================
 st.title("🗺️ Painel de Consulta - Municípios da Paraíba")
 st.markdown("Insira o nome de um município para acessar diretamente os dados na FAMUP.")
 
-nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Sapé")
+nome_busca = st.text_input("Nome do Município:", placeholder="Ex: Aguiar, Alagoa Grande, Alcantil")
 
 if st.button("Buscar Informações", type="primary"):
     if nome_busca.strip():
@@ -123,44 +115,49 @@ if st.button("Buscar Informações", type="primary"):
         if isinstance(resultado, dict):
             st.success("📊 Dados recuperados com sucesso!")
             
-            # --- SEÇÃO DA BANDEIRA ---
-            # Se o robô capturar o link da bandeira, exibe centralizado no topo do cartão
-            if 'url_bandeira' in resultado:
-                st.image(resultado['url_bandeira'], caption=f"Bandeira de {nome_busca.title()}", width=180)
+            # Divide a tela para colocar a bandeira e as informações lado a lado de forma elegante
+            col_bandeira, col_info = st.columns([1, 2])
             
-            # Exibição dos dados textuais limpos na tela
-            st.markdown(f"### 🏢 {resultado.get('Razão Social', nome_busca.upper())}")
-            st.markdown(f"👑 **Prefeito(a):** {resultado.get('Prefeito Atual', 'Não informado')}")
-            st.markdown(f"📍 **Endereço:** {resultado.get('Endereço', 'Não informado')}")
-            st.markdown(f"📞 **Telefones:** {resultado.get('Telefones', 'Não informado')}")
-            st.markdown(f"✉️ **E-mails:** {resultado.get('E-mails de Contato', 'Não informado')}")
+            with col_bandeira:
+                if 'url_bandeira' in resultado:
+                    st.image(resultado['url_bandeira'], caption=f"Bandeira Oficial", use_container_width=True)
+                else:
+                    st.info("🏳️ Bandeira não localizada no HTML.")
             
-            site = resultado.get('Site Oficial')
-            if site:
-                site_limpo = site.lower().replace("site", "").strip()
-                url_completa = site_limpo if site_limpo.startswith("http") else f"https://{site_limpo}"
-                st.markdown(f"🌐 **Site Oficial:** [{site_limpo}]({url_completa})")
-            else:
-                st.markdown("🌐 **Site Oficial:** Não informado")
+            with col_info:
+                st.markdown(f"### 🏢 {resultado.get('Razão Social', nome_busca.upper())}")
+                st.markdown(f"👑 **Prefeito(a):** {resultado.get('Prefeito Atual', 'Não informado')}")
+                st.markdown(f"📍 **Endereço:** {resultado.get('Endereço', 'Não informado')}")
+                st.markdown(f"📞 **Telefones:** {resultado.get('Telefones', 'Não informado')}")
+                st.markdown(f"✉️ **E-mails:** {resultado.get('E-mails de Contato', 'Não informado')}")
                 
-            # --- SEÇÃO DO MAPA INTERATIVO ---
-            # Mostra o mapa geográfico acoplado com base no nome do município digitado
-            st.write("")
-            st.markdown("📍 **Localização Geográfica:**")
+                site = resultado.get('Site Oficial')
+                if site:
+                    site_limpo = site.lower().replace("site", "").strip()
+                    url_completa = site_limpo if site_limpo.startswith("http") else f"https://{site_limpo}"
+                    st.markdown(f"🌐 **Site Oficial:** [{site_limpo}]({url_completa})")
+                else:
+                    st.markdown("🌐 **Site Oficial:** Não informado")
+            
+            # --- SEÇÃO DO MAPA GEOGRÁFICO NATIVO ---
+            st.markdown("---")
+            st.markdown(f"📍 **Localização Geográfica de {nome_busca.title()} - PB:**")
+            
+            # Incorporação limpa e interativa do mapa via iframe
+            url_mapa = f"https://google.com{nome_busca.replace(' ', '%20')},Paraiba,Brasil&t=&z=12&ie=UTF8&iwloc=&output=embed"
+            st.components.v1.iframe(url_mapa, height=400, scrolling=False)
+
         else:
             st.error(resultado)
     else:
         st.warning("⚠️ Digite o nome de um município para realizar a operação.")
 
 # =============================================================================
-# 5. RODAPÉ DE AUTORIA E FONTE INSTITUCIONAL (FIXO NO FIM DA PÁGINA)
+# 5. RODAPÉ DE AUTORIA E FONTE INSTITUCIONAL
 # =============================================================================
 st.markdown("---")
-# Monta dinamicamente o link da fonte para a cidade buscada ou mantém o link geral da federação
-link_fonte = FAMUP_BASE_URL
-if 'nome_busca' in locals() and nome_busca.strip():
-    slug_atual = normalizar_slug_municipio(nome_busca)
-    link_fonte = f"{FAMUP_BASE_URL}/{slug_atual}/"
+slug_atual = normalizar_slug_municipio(nome_busca) if nome_busca.strip() else ""
+link_fonte = f"{FAMUP_BASE_URL}/{slug_atual}/" if slug_atual else FAMUP_BASE_URL
 
 st.markdown(
     f"<div style='text-align: center; color: gray; font-size: 0.85em;'>"
