@@ -152,6 +152,43 @@ def extrair_dados_famup(municipio: str) -> dict | str:
         return dados_coletados
     except Exception as e:
         return f"❌ Erro ao acessar o link [{url_direta}]: {e}"
+        # -------------------------------------------------------------
+        # DECODIFICADOR DE EMAIL DA CLOUDFLARE (Solução para [email protected])
+        # -------------------------------------------------------------
+        def decodificar_cloudflare_email(cf_hex):
+            try:
+                # O primeiro par de caracteres é a chave de criptografia
+                k = int(cf_hex[:2], 16)
+                # O restante são os caracteres do e-mail mascarados com XOR
+                email = ''.join([chr(int(cf_hex[i:i+2], 16) ^ k) for i in range(2, len(cf_hex), 2)])
+                return email
+            except Exception:
+                return None
+
+        # Busca por qualquer tag que contenha o atributo de proteção da Cloudflare
+        tags_com_email = soup.find_all(attrs={"data-cfemail": True})
+        emails_decodificados = []
+
+        for tag in tags_com_email:
+            cfemail = tag.get("data-cfemail")
+            email_real = decodificar_cloudflare_email(cfemail)
+            if email_real:
+                emails_decodificados.append(email_real)
+
+        if emails_decodificados:
+            # Filtra duplicados mantendo a ordem
+            emails_unicos = list(dict.fromkeys(emails_decodificados))
+            dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
+        else:
+            # Mantém seu fallback original caso o site mude ou não use Cloudflare em alguma página
+            link_email = soup.find('a', href=re.compile(r'^mailto:'))
+            if link_email and '[email protected]' not in link_email.get_text():
+                dados_coletados['E-mails de Contato'] = link_email.get_text(strip=True)
+            else:
+                possiveis_emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', soup.get_text())
+                if possiveis_emails:
+                    emails_unicos = list(dict.fromkeys(possiveis_emails))
+                    dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
 
 # =============================================================================
 # 5. INTERFACE DO USUÁRIO (STREAMLIT UI)
