@@ -116,15 +116,43 @@ def extrair_dados_famup(municipio: str) -> dict | str:
             return f"❌ O endereço direto não foi encontrado na FAMUP.\nLink tentado: {url_direta}"
         elif response.status_code != 200:
             return f"❌ Erro de conexão com a FAMUP (Código HTTP: {response.status_code})."
-        
+       
+        # -------------------------------------------------------------
+        # CAPTURA DA BANDEIRA E FOTO
+        # -------------------------------------------------------------      
+        # Captura da Bandeira Oficial via SisGF
         soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
-        # Captura da Bandeira Oficial via SisGF
-        tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
-        if tag_img and tag_img.get('src'):
-            dados_coletados['url_bandeira'] = tag_img['src']
+        # Inicializa as variáveis de imagem como None ou string vazia
+        dados_coletados['url_bandeira'] = None
+        dados_coletados['url_prefeito'] = None
+
+        # Captura Inteligente da Bandeira e Foto do Prefeito via SisGF
+        todas_as_imagens = soup.find_all('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG|\.jpg|\.png)', re.IGNORECASE))
+        
+        for tag_img in todas_as_imagens:
+            src_url = tag_img.get('src', '')
             
+            # 1. Identifica se é a bandeira/brasão municipal
+            if "prefeitura_municipal" in src_url.lower():
+                dados_coletados['url_bandeira'] = src_url
+                
+            # 2. Identifica se é a foto do prefeito
+            elif "user-circle.png" in src_url.lower():
+                dados_coletados['url_prefeito'] = "Sem foto cadastrada"
+            elif "foto_contatos" in src_url.lower() and dados_coletados['url_bandeira'] != src_url:
+                # Se está na pasta foto_contatos e não é a bandeira, é a foto do prefeito
+                dados_coletados['url_prefeito'] = src_url
+
+        # Caso o site mude o padrão do link da bandeira, usamos a primeira imagem como fallback
+        if not dados_coletados['url_bandeira'] and todas_as_imagens:
+            # Filtra para não pegar o avatar padrão como bandeira por acidente
+            imagens_filtradas = [img.get('src') for img in todas_as_imagens if "user-circle" not in img.get('src', '')]
+            if imagens_filtradas:
+                dados_coletados['url_bandeira'] = imagens_filtradas[0]
+            
+        
         # -------------------------------------------------------------
         # NOVA ABORDAGEM DE BUSCA ROBUSTA (Baseada em texto e rótulos)
         # -------------------------------------------------------------
