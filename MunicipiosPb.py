@@ -256,13 +256,20 @@ if st.button("Buscar Informações", type="primary"):
             # Layout em colunas: Bandeira à esquerda e Informações à direita
             col_bandeira, col_info = st.columns([1, 2])
             with col_bandeira:
-                if 'url_bandeira' in resultado:
+                if resultado.get('url_bandeira'):
                     st.image(resultado['url_bandeira'], caption="Bandeira Oficial", use_container_width=True)
                 else:
                     st.info("🏳️ Bandeira não localizada.")
             
             with col_info:
                 st.markdown(f"### 🏢 {resultado.get('Razão Social', nome_busca.upper())}")
+                
+                # --- EXIBIÇÃO INTELIGENTE DA FOTO DO PREFEITO ---
+                url_prefeito = resultado.get('url_prefeito')
+                if url_prefeito and url_prefeito != "Sem foto cadastrada":
+                    # Exibe a foto do prefeito com largura controlada para não quebrar o layout
+                    st.image(url_prefeito, width=120, caption="Foto do(a) Prefeito(a)")
+                
                 st.markdown(f"👑 **Prefeito(a):** {resultado.get('Prefeito Atual', 'Não informado')}")
                 st.markdown(f"📍 **Endereço:** {resultado.get('Endereço', 'Não informado')}")
                 st.markdown(f"📞 **Telefones:** {resultado.get('Telefones', 'Não informado')}")
