@@ -82,7 +82,7 @@ COORDENADAS_MUNICICIPIOS = {
     "zabele": (-7.97, -37.10)
 }
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(response.text, 'html.parser')
         dados_coletados = {}
         
         # Inicializa as variáveis de imagem como None ou string vazia
