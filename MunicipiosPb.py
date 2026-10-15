@@ -83,7 +83,7 @@ COORDENADAS_MUNICICIPIOS = {
 }
 
 soup = BeautifulSoup(response.text, 'html.parser')
-        dados_coletados = {}
+dados_coletados = {}
         
         # Inicializa as variáveis de imagem como None ou string vazia
         dados_coletados['url_bandeira'] = None
