@@ -82,40 +82,131 @@ COORDENADAS_MUNICICIPIOS = {
     "zabele": (-7.97, -37.10)
 }
 
-soup = BeautifulSoup(response.text, 'html.parser')
-dados_coletados = {}
-        
-        # Inicializa as variáveis de imagem como None ou string vazia
-        dados_coletados['url_bandeira'] = None
-        dados_coletados['url_prefeito'] = None
+# =============================================================================
+# 3. TRATAMENTO DE STRINGS E MAPA DE CHAVES GEOGRÁFICAS
+# =============================================================================
+def normalizar_slug_municipio(nome_municipio: str) -> str:
+    """Gera o link com hífen para o portal da FAMUP (ex: alagoa-grande)"""
+    slug = nome_municipio.strip().lower()
+    slug = ''.join(c for c in unicodedata.normalize('NFD', slug) if unicodedata.category(c) != 'Mn')
+    slug = slug.replace(" ", "-")
+    slug = re.sub(r'[^a-z0-9\-]', '', slug)
+    slug = re.sub(r'-+', '-', slug)
+    return slug
 
-        # Captura Inteligente da Bandeira e Foto do Prefeito via SisGF
-        todas_as_imagens = soup.find_all('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG|\.jpg|\.png)', re.IGNORECASE))
+def normalizar_chave_coordenada(nome_municipio: str) -> str:
+    """Gera a chave grudada para casar com o seu dicionário (ex: alagoagrande)"""
+    slug = nome_municipio.strip().lower()
+    slug = ''.join(c for c in unicodedata.normalize('NFD', slug) if unicodedata.category(c) != 'Mn')
+    slug = re.sub(r'[^a-z0-9]', '', slug)
+    return slug
+# =============================================================================
+# 4. EXTRAÇÃO DE DADOS TEXTUAIS E BANDEIRA (WEB SCRAPING)
+# =============================================================================
+def extrair_dados_famup(municipio: str) -> dict | str:
+    slug = normalizar_slug_municipio(municipio)
+    
+    # GARANTIA DE URL: Mantém a base estável com o diretório /paraiba fixo
+    url_direta = f"{FAMUP_BASE_URL}/{slug}/"
+    
+    try:
+        response = requests.get(url_direta, headers=HTTP_HEADERS, timeout=10)
         
-        for tag_img in todas_as_imagens:
-            src_url = tag_img.get('src', '')
-            
-            # 1. Identifica se é a bandeira/brasão municipal
-            if "prefeitura_municipal" in src_url.lower():
-                dados_coletados['url_bandeira'] = src_url
-                
-            # 2. Identifica se é a foto do prefeito
-            elif "user-circle.png" in src_url.lower():
-                dados_coletados['url_prefeito'] = "Sem foto cadastrada"
-            elif "foto_contatos" in src_url.lower() and dados_coletados['url_bandeira'] != src_url:
-                # Se está na pasta foto_contatos e não é a bandeira, é a foto do prefeito
-                dados_coletados['url_prefeito'] = src_url
-
-        # Caso o site mude o padrão do link da bandeira, usamos a primeira imagem como fallback
-        if not dados_coletados['url_bandeira'] and todas_as_imagens:
-            # Filtra para não pegar o avatar padrão como bandeira por acidente
-            imagens_filtradas = [img.get('src') for img in todas_as_imagens if "user-circle" not in img.get('src', '')]
-            if imagens_filtradas:
-                dados_coletados['url_bandeira'] = imagens_filtradas[0]
+        if response.status_code == 404:
+            return f"❌ O endereço direto não foi encontrado na FAMUP.\nLink tentado: {url_direta}"
+        elif response.status_code != 200:
+            return f"❌ Erro de conexão com a FAMUP (Código HTTP: {response.status_code})."
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        dados_coletados = {}
+        
+        # Captura da Bandeira Oficial via SisGF
+        tag_img = soup.find('img', src=re.compile(r'(sisgf|foto_contatos|\.PNG)'))
+        if tag_img and tag_img.get('src'):
+            dados_coletados['url_bandeira'] = tag_img['src']
             
         # -------------------------------------------------------------
         # NOVA ABORDAGEM DE BUSCA ROBUSTA (Baseada em texto e rótulos)
         # -------------------------------------------------------------
+        
+        # Função auxiliar para limpar e achar valores próximos
+        def buscar_campo(termos_chave):
+            for termo in termos_chave:
+                elemento = soup.find(string=re.compile(f"^{termo}$", re.IGNORECASE))
+                if elemento:
+                    pai = elemento.find_parent()
+                    if pai:
+                        texto_completo = pai.get_text(separator=" ", strip=True)
+                        for t in termos_chave:
+                            texto_completo = re.sub(t, "", texto_completo, flags=re.IGNORECASE)
+                        valor_limpo = texto_completo.replace(":", "").strip()
+                        if valor_limpo and len(valor_limpo) > 2:
+                            return valor_limpo
+            return None
+
+        # =============================================================
+        # [AQUI ENTRA A ALTERAÇÃO] DECODIFICADOR DE EMAIL CLOUDFLARE
+        # =============================================================
+        def decodificar_cloudflare_email(cf_hex):
+            try:
+                k = int(cf_hex[:2], 16)
+                email = ''.join([chr(int(cf_hex[i:i+2], 16) ^ k) for i in range(2, len(cf_hex), 2)])
+                return email
+            except Exception:
+                return None
+
+        # Busca por tags com a proteção da Cloudflare
+        tags_com_email = soup.find_all(attrs={"data-cfemail": True})
+        emails_decodificados = []
+
+        for tag in tags_com_email:
+            cfemail = tag.get("data-cfemail")
+            email_real = decodificar_cloudflare_email(cfemail)
+            if email_real:
+                emails_decodificados.append(email_real)
+
+        if emails_decodificados:
+            emails_unicos = list(dict.fromkeys(emails_decodificados))
+            dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
+        else:
+            # Fallback caso o site mude ou não use Cloudflare em alguma página
+            link_email = soup.find('a', href=re.compile(r'^mailto:'))
+            if link_email and '[email protected]' not in link_email.get_text():
+                dados_coletados['E-mails de Contato'] = link_email.get_text(strip=True)
+            else:
+                possiveis_emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', soup.get_text())
+                if possiveis_emails:
+                    emails_unicos = list(dict.fromkeys(possiveis_emails))
+                    dados_coletados['E-mails de Contato'] = " | ".join(emails_unicos)
+        # =============================================================
+
+        # Mapeamento dos demais campos usando a lógica anterior ajustada
+        mapeamento = {
+            'razão social': 'Razão Social',
+            'endereço': 'Endereço',
+            'site': 'Site Oficial',
+            'telefones': 'Telefones',
+            'prefeito': 'Prefeito Atual'
+        }
+        
+        linhas_pagina = [re.sub(r'\s+', ' ', l).strip() for l in soup.get_text().split('\n') if l.strip()]
+        for i, linha_servidor in enumerate(linhas_pagina):
+            linha_lower = linha_servidor.lower()
+            for termo_html, label_interface in mapeamento.items():
+                if termo_html in linha_lower:
+                    for j in range(1, 4):
+                        if i + j < len(linhas_pagina):
+                            candidato_valor = \
+                            linhas_pagina[i + j]
+                            if candidato_valor in ['-', 'Bandeira', 'Dados Gerais'] or '@' in candidato_valor:
+                                continue
+                            dados_coletados[label_interface] = candidato_valor
+                            break
+                            
+        return dados_coletados
+
+    except Exception as e:
+        return f"❌ Erro ao acessar o link [{url_direta}]: {e}"
 # =============================================================================
 # 5. INTERFACE DO USUÁRIO (STREAMLIT UI)
 # =============================================================================
@@ -137,20 +228,13 @@ if st.button("Buscar Informações", type="primary"):
             # Layout em colunas: Bandeira à esquerda e Informações à direita
             col_bandeira, col_info = st.columns([1, 2])
             with col_bandeira:
-                if resultado.get('url_bandeira'):
+                if 'url_bandeira' in resultado:
                     st.image(resultado['url_bandeira'], caption="Bandeira Oficial", use_container_width=True)
                 else:
                     st.info("🏳️ Bandeira não localizada.")
             
             with col_info:
                 st.markdown(f"### 🏢 {resultado.get('Razão Social', nome_busca.upper())}")
-                
-                # --- EXIBIÇÃO INTELIGENTE DA FOTO DO PREFEITO ---
-                url_prefeito = resultado.get('url_prefeito')
-                if url_prefeito and url_prefeito != "Sem foto cadastrada":
-                    # Exibe a foto do prefeito com largura controlada para não quebrar o layout
-                    st.image(url_prefeito, width=120, caption="Foto do(a) Prefeito(a)")
-                
                 st.markdown(f"👑 **Prefeito(a):** {resultado.get('Prefeito Atual', 'Não informado')}")
                 st.markdown(f"📍 **Endereço:** {resultado.get('Endereço', 'Não informado')}")
                 st.markdown(f"📞 **Telefones:** {resultado.get('Telefones', 'Não informado')}")
