@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 # =============================================================================
 st.set_page_config(
     page_title="Consulta FAMUP - PB",
-    page_icon="🗺️🌵",
+    page_icon="🗺️",
     layout="centered"
 )
 
